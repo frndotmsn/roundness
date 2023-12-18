@@ -1,11 +1,14 @@
 use std::iter::once;
 
+use axum::Json;
+use axum::{Router, routing::{get, post}};
 use itertools::Itertools;
 use nalgebra::{Isometry, Isometry2, Point2, Vector2};
 use ncollide2d::bounding_volume::{BoundingSphere, BoundingVolume};
 use ncollide2d::query::PointQuery;
 use ncollide2d::shape::{Ball, ConvexPolygon, ConvexPolyhedron, Segment, Shape, ShapeHandle};
 use ordered_float::OrderedFloat;
+use serde::{Deserialize, Serialize};
 use voronoi::voronoi;
 
 fn incircle(polygon: &ConvexPolygon<f64>) -> BoundingSphere<f64> {
@@ -53,19 +56,34 @@ fn circumcircle(polygon: &ConvexPolygon<f64>) -> BoundingSphere<f64> {
 fn roundness(polygon: &ConvexPolygon<f64>) -> f64 {
     let circumcircle = circumcircle(polygon);
     let incircle = incircle(polygon);
-    dbg!(circumcircle);
-    dbg!(incircle);
     (incircle.radius() / circumcircle.radius()).powi(2)
 }
 
-fn main() {
-    let points = [
-        Point2::new(0.0, 0.0),
-        Point2::new(0.0, 1.0),
-        Point2::new(1.0, 0.0),
-        Point2::new(1.0, 1.0),
-    ];
+#[derive(Serialize, Deserialize)]
+struct Payload {
+    points: Vec<(f64, f64)>,
+}
+
+#[tokio::main]
+async fn main()
+{
+    let app = Router::new()
+        .route("/", get(|| async { "Hello, World!" }))
+        .route("/roundness", get(|| async { Json(Payload { points: vec![(0.0, 0.0), (1.0, 1.0)] }) }))
+        .route("/roundness", post(api_roundness));
+    
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    axum::serve(listener, app.into_make_service()).await.unwrap();
+}
+
+#[derive(Serialize, Deserialize)]
+struct RoundnessResult {
+    roundness: f64
+}
+
+async fn api_roundness(Json(payload): Json<Payload>) -> Json<RoundnessResult> {
+    let points = payload.points.iter().map(|(x, y)| Point2::new(*x, *y)).collect::<Vec<_>>();
     let polygon = ConvexPolygon::try_from_points(&points).unwrap();
-    let current_roundness = roundness(&polygon);
-    println!("Roundness: {}", current_roundness);
+    let roundness = roundness(&polygon);
+    Json(RoundnessResult { roundness })
 }
